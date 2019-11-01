@@ -10,7 +10,7 @@
          (except-in 2htdp/image frame))
 
 (define (impress-me . steps)
-  (impress-site
+  (impress-site #:transition-duration 200
     #:head (head)
     steps
     (include-bootstrap-js)))
@@ -27,8 +27,9 @@
 (define (head)
   (list
     (include-bootstrap-css)  
-    (link href: "https://fonts.googleapis.com/css?family=Open+Sans:regular,semibold,italic,italicsemibold|PT+Sans:400,700,400italic,700italic|PT+Serif:400,700,400italic,700italic" 'rel: "stylesheet")
-    (link href: "https://impress.js.org/css/impress-demo.css" 'rel: "stylesheet")))
+    #;(link href: "https://fonts.googleapis.com/css?family=Open+Sans:regular,semibold,italic,italicsemibold|PT+Sans:400,700,400italic,700italic|PT+Serif:400,700,400italic,700italic" 'rel: "stylesheet")
+    #;(link href: "https://impress.js.org/css/impress-demo.css" 'rel: "stylesheet")
+    ))
 
 
 
