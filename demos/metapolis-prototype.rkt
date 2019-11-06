@@ -3,20 +3,11 @@
 (require (except-in website/impress site time) 
          (except-in website/bootstrap col site time)  
          (except-in 2htdp/image frame)
-         "./util.rkt")
+         "../main.rkt")
 
 (require metapolis-stories
          stories
          posn)
-
-
-;A tool for non-linear navigation of spatially/temporally/(charactorially?) organized text.
-
-;What abstractions?
-;  Observation net?  Move cardinally above a more chaotic/textured space?
-
-;Things within things...
-
 
 
 (define (rect w h . contents)
@@ -65,6 +56,7 @@
 
 (define preview-ring
   '())
+
 (define (zoom-pair id p (zoom-ring '()))
   (define preview-id (~a id "-preview"))
   (define zoom-id (~a id "-zoom"))
@@ -134,9 +126,4 @@
     (impress-me
       steps )))
 
-(render 
-  (test)
-  #;
-  (parameterize ([all-stories stories:all])
-    (test)) 
-  #:to "out")
+(render (test) #:to "out")
