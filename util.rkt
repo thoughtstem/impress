@@ -9,7 +9,9 @@
            [make-level level])
          ring->steps
          level-depth
-         with-depth)
+         with-depth
+         on-node-visit
+         string->node-id)
 
 (require website/impress 
          (only-in website/bootstrap
@@ -23,11 +25,13 @@
 
 (struct node (id x y content) #:transparent)
 (struct ring (nodes) #:transparent)
-
-(define ring-nav-keys  '("ArrowRight" "ArrowLeft"))
-(define level-nav-keys '("ArrowUp" "ArrowDown"))
-
 (struct level (node ring))
+
+(define (string->node-id s)
+  (string-replace #:all? #t
+    (string-replace #:all? #t
+                    s "'" "")
+    " " "-"))
 
 (define (make-node #:id (id (~a (gensym 'id))) x y content)
   (node (string-replace id "'" "") x y content))
@@ -69,49 +73,23 @@
   (exact->inexact 
     (expt (level-depth) (- (length (current-parent-stack))))))
 
-(define (current-ring-keys n)
-  (if (current-ring)
-    ring-nav-keys
-    '()))
-
 (define (current-ring-neighbors n)
   (if (not (current-ring))
     '()  
     (ring-neighbors (current-ring) n)))
 
-(define (current-level-keys n)
-  (filter-not void?
-              (list
-                (when (current-child)
-                  (first level-nav-keys)) 
-                (when (not (empty? (current-parent-stack)))
-                  (second level-nav-keys)))))
+(define (landing-node? n)
+  (and (not (empty? (current-parent-stack)))
+       (not (empty? (ring-nodes (current-ring))))
+       (eq? n (first (ring-nodes (current-ring))))))
 
 (define (current-level-neighbors n)
   (filter-not void?
               (list
                 (when (current-child)
                   (current-child))
-                (when (not (empty? (current-parent-stack)))
+                (when (landing-node? n)
                   (first (current-parent-stack))))))
-
-(define (node-nav-keys n)
-  (string-join
-    (flatten
-      (append
-        (current-ring-keys n)
-        (current-level-keys n)))
-    " "))
-
-(define (node-next-list n)
-  (string-join
-    (map node-id
-         (filter identity
-                 (flatten
-                   (append
-                     (current-ring-neighbors n)
-                     (current-level-neighbors n)))))
-    " "))
 
 (define (offset-x n)
   (define (adj x i)
@@ -136,7 +114,10 @@
                 (reverse (range (length (current-parent-stack))))))))
 
 (define (entrance-node n)
-  (first (current-level-neighbors n)))
+  (define neighbors (current-level-neighbors n))
+  (if (not (empty? neighbors))
+    (first neighbors)
+    #f))
 
 
 (define (node->step n)
@@ -151,11 +132,10 @@
                        (offset-y n))
                 #:z (* -1000 (length (current-parent-stack)))
                 #:scale (node-scale n)  
-                ;#:goto (node-id n)
-                #:key-list  (node-nav-keys n)
-                #:next-list (node-next-list n) 
                 id: (node-id n)
-                'onClick: (~a "if(window.location.href.includes('#/" (node-id n) "')){setTimeout(() => impress().goto('" (node-id (entrance-node n)) "'), 1)}")
+                'onClick: (if (entrance-node n) 
+                            (~a "if(window.location.href.includes('#/" (node-id n) "')){setTimeout(() => impress().goto('" (node-id (entrance-node n)) "'), 1)}")
+                            "")
                 (node-content n))]))
 
 (define (ring->steps r)
@@ -169,9 +149,7 @@
 
   (define n-step
     (parameterize ([current-child (first (ring-nodes r))])
-      (node->step n))
-    
-    )
+      (node->step n)))
 
   (define r-steps
     (parameterize ([current-parent-stack (cons n (current-parent-stack))]) 
@@ -184,6 +162,8 @@
   (impress-site #:transition-duration 200
     #:head (head)
     steps
+    
+
     (include-bootstrap-js)))
 
 
@@ -203,3 +183,15 @@
     ))
 
 
+(define (on-node-visit . some-js-strings)
+  (define combined (string-join some-js-strings))
+    @script/inline{
+      var rootElement = document.getElementById( "impress" );
+      rootElement.addEventListener( "impress:stepenter", function(event) {
+        var currentStep = event.target;
+
+        @combined
+      }); 
+
+    }
+  )
