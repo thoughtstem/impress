@@ -25,7 +25,7 @@
 
 (struct node (id x y content) #:transparent)
 (struct ring (nodes) #:transparent)
-(struct level (node ring))
+(struct level (node ring) #:transparent)
 
 (define (string->node-id s)
   (string-replace #:all? #t
@@ -33,14 +33,37 @@
                     s "'" "")
     " " "-"))
 
+(define (get-id n)
+  (cond 
+    [(level? n) (node-id (level-node n))]
+    [(node? n) (node-id n)]
+    [(not n) ""]))
+
 (define (make-node #:id (id (~a (gensym 'id))) x y content)
   (node (string-replace id "'" "") x y content))
 
-(define (make-ring . ns)
-  (ring (flatten ns)))
+(define/contract (make-ring . ns)
+  (->* () () #:rest (listof (or/c level? node? ring? list?)) ring?)
+  (ring (ring-flatten ns)))
 
-(define (make-level parent children)
-  (level parent children))
+
+(define (ring-flatten ns)
+  (define (de-ring n)
+    (if (ring? n)
+      (ring-nodes n)
+      n))
+  (flatten (map de-ring (flatten ns))))
+
+(define/contract (make-level parent children)
+  (-> node? 
+      (or/c node? level? ring?) 
+      level?)
+  (level parent 
+         (cond 
+           [(or (node? children)
+                (level? children)) 
+            (make-ring children)]
+           [else children])))
 
 (define (ring-neighbors r n)
   (define ns (map (lambda (n)
@@ -55,10 +78,6 @@
   (list (list-ref ns prev) 
         (list-ref ns next)))
 
-(define (ring->next-list r n)
-  (string-join
-    (map node-id (ring-neighbors r n))
-    " "))  
 
 (define current-ring          (make-parameter #f))
 (define current-parent-stack  (make-parameter '()))
@@ -69,9 +88,6 @@
   (parameterize ([level-depth n])
     stuff ...))
 
-(define (node-scale n)
-  (exact->inexact 
-    (expt (level-depth) (- (length (current-parent-stack))))))
 
 (define (current-ring-neighbors n)
   (if (not (current-ring))
@@ -83,60 +99,90 @@
        (not (empty? (ring-nodes (current-ring))))
        (eq? n (first (ring-nodes (current-ring))))))
 
-(define (current-level-neighbors n)
-  (filter-not void?
-              (list
-                (when (current-child)
-                  (current-child))
-                (when (landing-node? n)
-                  (first (current-parent-stack))))))
+(define (current-level-parent n)
+  (cond 
+    ;No stack.  You are a top parent
+    [(empty? (current-parent-stack)) #f]
 
-(define (offset-x n)
-  (define (adj x i)
-    (* x (expt (level-depth) (- i))))
+    ;Last one on the stack?  You are at the top level and have no parents.
+    [(eq? n (last (current-parent-stack))) 
+     #f]
 
-  (if (empty? (current-parent-stack))
-    0
-    (apply + 
-           (map adj 
-                (map node-x (current-parent-stack))
-                (reverse (range (length (current-parent-stack)))) ))))
+    ;Not on the stack? Then the first node on the stack is your parent
+    [(not (member n (current-parent-stack))) 
+     (first (current-parent-stack))]
 
-(define (offset-y n)
-  (define (adj y i)
-    (* y (expt (level-depth) (- i))))
+    ;In the stack?  The next node up deeper in the stack is your parent.
+    [else (list-ref (current-parent-stack) 
+                    (add1 (index-of (current-parent-stack) n)))]))
 
-  (if (empty? (current-parent-stack))
-    0
-    (apply + 
-           (map adj 
-                (map node-y (current-parent-stack))
-                (reverse (range (length (current-parent-stack))))))))
+(define (current-depth-of n)
+  (cond
+    [(empty? (current-parent-stack)) 0]
+    [(not (member n (current-parent-stack))) (length (current-parent-stack))]
+    [else (index-of (current-parent-stack) n)]))
 
-(define (entrance-node n)
-  (define neighbors (current-level-neighbors n))
-  (if (not (empty? neighbors))
-    (first neighbors)
-    #f))
+(define (node-scale n (depth (current-depth-of n)))
+  (if (= 0 depth)
+    1
+    (/ 1 (expt (level-depth) 
+               depth))))
 
+;Offset the nodes in a ring by their level parent's
+;  position.  So that (0 0) is directly beneath the parent.
+(define (calc-absolute node-* 
+                       n 
+                       (depth (current-depth-of n)))
+
+  (define my-* (* (node-scale n depth)
+                  (node-* n)))
+
+  (define parent (current-level-parent n))
+
+  (+ my-*
+     (if (not parent)
+       0
+       (calc-absolute node-* parent (sub1 depth)) )))
+
+
+(define (first-in-current-ring n)
+  (eq? (get-id n)
+       (get-id (first (ring-nodes (current-ring))))))
 
 (define (node->step n)
   (cond
     [(ring? n)  (ring->steps n)]
     [(level? n) (level->steps n)]
-    [else (step #:x (+ (* (node-x n) 
-                          (node-scale n))
-                       (offset-x n))
-                #:y (+ (* (node-y n)
-                          (node-scale n))
-                       (offset-y n))
-                #:z (* -1000 (length (current-parent-stack)))
-                #:scale (node-scale n)  
-                id: (node-id n)
-                'onClick: (if (entrance-node n) 
-                            (~a "if(window.location.href.includes('#/" (node-id n) "')){setTimeout(() => impress().goto('" (node-id (entrance-node n)) "'), 1)}")
-                            "")
-                (node-content n))]))
+    [else 
+      (step #:x (~r (calc-absolute node-x n)
+                    #:precision 3)   
+            #:y (~r (calc-absolute node-y n)
+                    #:precision 3)    
+            #:z (* -1000 (length (current-parent-stack)))
+            #:scale (~r (node-scale n)
+                        #:precision 3)
+            id: (node-id n)
+            'onClick: (~a "if(window.location.href.includes('#/" (node-id n) "')){setTimeout(() => impress().goto('" 
+                            (cond 
+                              [(current-child) (get-id (current-child))]
+                              [(and (current-level-parent n)
+                                    (first-in-current-ring n)) (get-id (current-level-parent n))]
+                              [else ""]) 
+
+                            "'), 1)}")
+            (node-content n)
+            (when (impress-debug)
+              (list
+                @div{
+                id:@(get-id n), 
+                pid:@(get-id (current-level-parent n)),
+                cid:@(get-id (current-child)),
+                d:@(current-depth-of n)
+                }
+                (hr)
+                @div{relative, x:@(node-x n),y:@(node-y n)}
+                (hr)))
+            )]))
 
 (define (ring->steps r)
   (parameterize ([current-ring r])
